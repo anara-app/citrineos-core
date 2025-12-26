@@ -288,7 +288,8 @@ async function main(): Promise<void> {
     const stationRow = pickExistingColumns(
       {
         id: stationId,
-        isOnline: false,
+        // Make the demo station online so overview cards show non-zero counts.
+        isOnline: true,
         protocol: '2.0.1',
         chargePointVendor: 'CitrineOS',
         chargePointModel: 'DemoStation',
@@ -364,6 +365,111 @@ async function main(): Promise<void> {
 
       evseDbId = (evseRes.row as any).id ?? (evseRes.row as any).databaseId ?? null;
     }
+  }
+
+  // ---- StatusNotifications + LatestStatusNotifications (optional)
+  // /overview charger activity expects LatestStatusNotifications -> StatusNotification.connectorStatus
+  // to exist (otherwise everything is Unavailable). Also it matches by evseTypeId.
+  const statusNotificationsDesc = await describeTableSafe(sequelize, 'StatusNotifications');
+  const latestStatusNotificationsDesc = await describeTableSafe(
+    sequelize,
+    'LatestStatusNotifications',
+  );
+  if (statusNotificationsDesc && latestStatusNotificationsDesc) {
+    const statusRow = pickExistingColumns(
+      {
+        stationId,
+        evseId: 1, // matches our demo EVSE evseTypeId=1 (UI compares against evse.evseTypeId)
+        connectorId: 1,
+        connectorStatus: 'Available',
+        errorCode: 'NoError',
+        timestamp: now(),
+        tenantId: DEFAULT_TENANT_ID,
+        createdAt: now(),
+        updatedAt: now(),
+      },
+      statusNotificationsDesc,
+    );
+
+    // Prefer stationId+evseId+connectorId uniqueness if those columns exist; otherwise fall back to idempotent by stationId.
+    const statusWhereParts: string[] = [];
+    const statusWhereParams: Record<string, unknown> = { stationId };
+    if (statusNotificationsDesc.stationId)
+      statusWhereParts.push(`${qIdent('stationId')} = :stationId`);
+    if (statusNotificationsDesc.evseId) {
+      statusWhereParts.push(`${qIdent('evseId')} = :evseId`);
+      statusWhereParams.evseId = 1;
+    }
+    if (statusNotificationsDesc.connectorId) {
+      statusWhereParts.push(`${qIdent('connectorId')} = :connectorId`);
+      statusWhereParams.connectorId = 1;
+    }
+    if (statusWhereParts.length === 0) {
+      // Nothing stable to match on; skip.
+    } else {
+      const statusRes = await ensureRow<{ id: number }>({
+        sequelize,
+        table: 'StatusNotifications',
+        uniqueWhereSql: statusWhereParts.join(' AND '),
+        uniqueParams: statusWhereParams,
+        row: statusRow,
+        returningCols: ['id'],
+      });
+
+      const latestRow = pickExistingColumns(
+        {
+          stationId,
+          statusNotificationId: statusRes.row.id,
+          tenantId: DEFAULT_TENANT_ID,
+          createdAt: now(),
+          updatedAt: now(),
+        },
+        latestStatusNotificationsDesc,
+      );
+
+      await ensureRow<{ id: number }>({
+        sequelize,
+        table: 'LatestStatusNotifications',
+        uniqueWhereSql: `${qIdent('stationId')} = :stationId AND ${qIdent('statusNotificationId')} = :statusNotificationId`,
+        uniqueParams: { stationId, statusNotificationId: statusRes.row.id },
+        row: latestRow,
+        returningCols: ['id'],
+      });
+    }
+  }
+
+  // ---- Transactions (optional)
+  // /overview plug-in success rate divides success/total; if total=0 it becomes NaN.
+  // Seed at least one transaction with totalKwh > 0 so the progress bar renders sanely.
+  const transactionsDesc = await describeTableSafe(sequelize, 'Transactions');
+  if (transactionsDesc) {
+    const txRow = pickExistingColumns(
+      {
+        stationId,
+        transactionId: 'demo-tx-1',
+        isActive: true,
+        chargingState: 'Charging',
+        timeSpentCharging: 600,
+        totalKwh: 5.25,
+        // Support both old and new schemas:
+        evseId: evseDbId,
+        evseDatabaseId: evseDbId,
+        evseTypeId: 1,
+        tenantId: DEFAULT_TENANT_ID,
+        createdAt: now(),
+        updatedAt: now(),
+      },
+      transactionsDesc,
+    );
+
+    await ensureRow<{ id: number }>({
+      sequelize,
+      table: 'Transactions',
+      uniqueWhereSql: `${qIdent('stationId')} = :stationId AND ${qIdent('transactionId')} = :transactionId`,
+      uniqueParams: { stationId, transactionId: 'demo-tx-1' },
+      row: txRow,
+      returningCols: ['id'],
+    });
   }
 
   // ---- Connectors (optional)
