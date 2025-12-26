@@ -38,12 +38,13 @@ services:
   citrine:
     build:
       context: ../
-      dockerfile: ./Server/deploy.Dockerfile
+      dockerfile: ./Server/local.Dockerfile
     volumes:
       - ../package-lock.json:/usr/local/apps/citrineos/package-lock-host.json
       - ../package.json:/usr/local/apps/citrineos/package.json
       - ../tsconfig.json:/usr/local/apps/citrineos/tsconfig.json
       - ../tsconfig.build.json:/usr/local/apps/citrineos/tsconfig.build.json
+      - ../db.populate.ts:/usr/local/apps/citrineos/db.populate.ts
       - ../Server:/usr/local/apps/citrineos/Server
       - ../00_Base:/usr/local/apps/citrineos/00_Base
       - ../01_Data:/usr/local/apps/citrineos/01_Data
