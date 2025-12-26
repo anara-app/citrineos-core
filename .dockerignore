@@ -7,7 +7,10 @@
 
 # Common ignore files
 .gitignore
+# NOTE: keep the root lockfile to make Docker builds deterministic.
+# (Still ignore any nested lockfiles if they exist.)
 **/package-lock.json
+!package-lock.json
 
 # Specific files and file types to ignore
 **/*.js
